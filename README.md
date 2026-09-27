@@ -19,4 +19,4 @@ MIT licensed.
 
 ## Building
 
-`source/unicorn-stable.src.html` is the code. `python source/build.py` records every voice line with [Kokoro](https://github.com/thewh1teagle/kokoro-onnx) (voice `af_heart`, pitched up with ffmpeg rubberband), caches the clips in `source/voice/`, and writes `unicorn-stable.html` and `index.html`. The Kokoro model files go in `source/model/` (not committed).
+`source/unicorn-stable.src.html` is the code. `python source/build.py` records every voice line with Microsoft's child voice `en-US-AnaNeural` (via [edge-tts](https://github.com/rany2/edge-tts)), caches the clips in `source/voice/`, and writes `unicorn-stable.html` and `index.html`. Kokoro is kept as an offline fallback engine; its model files go in `source/model/` (not committed).

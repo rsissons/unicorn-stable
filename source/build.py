@@ -1,8 +1,9 @@
 """Build Unicorn Stable: render every voice line to MP3 (cached) and bake them into the page.
 
 Usage:  python source/build.py
-Needs:  pip install kokoro-onnx soundfile ; ffmpeg with rubberband on PATH ;
-        source/model/kokoro-v1.0.onnx + voices-v1.0.bin (from the kokoro-onnx GitHub releases).
+Needs:  pip install edge-tts ; ffmpeg on PATH. Ron picked Microsoft's child voice "Ana" (2026-09-26)
+        after the pitched-up Kokoro voice sounded synthetic. ENGINE='kokoro' still works as an offline
+        fallback (pip install kokoro-onnx soundfile + source/model/kokoro-v1.0.onnx, voices-v1.0.bin).
 Output: unicorn-stable.html (artifact form, no <html>/<head>) and index.html (GitHub Pages form).
 """
 import base64, hashlib, json, os, re, subprocess, sys, tempfile
@@ -13,9 +14,9 @@ SRC = os.path.join(HERE, 'unicorn-stable.src.html')
 VDIR = os.path.join(HERE, 'voice')
 MDIR = os.path.join(HERE, 'model')
 
-# The unicorn's voice: Kokoro "af_heart", a little quicker, pitched up into a bubbly kid voice.
-VOICE, SPEED, PITCH = 'af_heart', 1.08, 1.24
-AFILTER = (f'rubberband=pitch={PITCH}:formant=shifted,'
+# The unicorn's voice: Microsoft's en-US-AnaNeural child voice, as-is (no pitch shifting).
+ENGINE, VOICE, SPEED, PITCH = 'edge', 'en-US-AnaNeural', 1.0, 1.0
+AFILTER = ((f'rubberband=pitch={PITCH}:formant=shifted,' if PITCH != 1.0 else '') +
            'silenceremove=start_periods=1:start_threshold=-45dB,areverse,'
            'silenceremove=start_periods=1:start_threshold=-45dB,areverse,'
            'loudnorm=I=-16:TP=-1.5:LRA=11')
@@ -36,20 +37,26 @@ def lines_from_source(src):
 
 
 def clip_path(key, text):
-    h = hashlib.sha1(f'{VOICE}|{SPEED}|{PITCH}|{text}'.encode()).hexdigest()[:10]
+    h = hashlib.sha1(f'{ENGINE}|{VOICE}|{SPEED}|{PITCH}|{text}'.encode()).hexdigest()[:10]
     return os.path.join(VDIR, f'{key}.{h}.mp3')
 
 
 def render(todo):
-    import soundfile as sf
-    from kokoro_onnx import Kokoro
-    kok = Kokoro(os.path.join(MDIR, 'kokoro-v1.0.onnx'), os.path.join(MDIR, 'voices-v1.0.bin'))
     with tempfile.TemporaryDirectory() as tmp:
+        raw = os.path.join(tmp, 'raw')
+        if ENGINE == 'edge':
+            import edge_tts
+            say = lambda text: edge_tts.Communicate(text, VOICE, rate=f'{round((SPEED - 1) * 100):+d}%').save_sync(raw)
+        else:
+            import soundfile as sf
+            from kokoro_onnx import Kokoro
+            kok = Kokoro(os.path.join(MDIR, 'kokoro-v1.0.onnx'), os.path.join(MDIR, 'voices-v1.0.bin'))
+            def say(text):
+                samples, sr = kok.create(text, voice=VOICE, speed=SPEED, lang='en-us')
+                sf.write(raw, samples, sr, format='WAV')
         for i, (key, text, out) in enumerate(todo, 1):
-            samples, sr = kok.create(text, voice=VOICE, speed=SPEED, lang='en-us')
-            wav = os.path.join(tmp, 'a.wav')
-            sf.write(wav, samples, sr)
-            subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', wav, '-af', AFILTER,
+            say(text)
+            subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', raw, '-af', AFILTER,
                             '-ac', '1', '-ar', '24000', '-b:a', '48k', out], check=True)
             print(f'[{i}/{len(todo)}] {key}: {text}')
 
